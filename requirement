@@ -1,0 +1,50 @@
+Project Overview: You want to build an automated, AI-driven dashboard for a healthcare project focused on Medicare Advantage plans for seniors (55+ years). The dashboard will analyze historical and daily incoming data to detect outliers, perform cohort analysis, and forecast sales, with Power BI for visualization.
+Data Sources:
+
+Membership Table: Demographic info (age, zip code, gender, etc.) and plan data (e.g., HMO, PPO, Medicare Advantage plan history) for seniors, covering 2023–2025.
+Claims Table: Raw claim details (member ID, claim amount, procedure codes, place of service like ER/preventive/primary, dates, visit counts) for the same period.
+Stored in Databricks, queried via Spark SQL.
+
+Core Requirements:
+
+Outlier Detection:
+
+Automatically detect outliers across all claim categories (e.g., ER spikes, high-dollar claims, frequency bursts, preventive care drops) without predefined categories.
+Use three years of historical data (2023–2025, daily granularity) to establish a baseline.
+Daily updates: Process new data to flag new outliers (e.g., "County X ER claims up 6x") and generate alerts.
+Examples: Sudden claim surges, unusual procedure patterns, or regional anomalies.
+
+
+Cohort Analysis:
+
+Group data by demographics (age, gender, zip), plan types, and claim patterns (e.g., seniors in Florida on PPO with high preventive claims).
+Analyze trends over time (e.g., claim spikes post-plan enrollment, seasonal patterns like winter ER visits).
+No predefined cohorts—AI auto-clusters based on data patterns (e.g., high-cost seniors, low-claim snowbirds).
+
+
+Sales Forecasting:
+
+Forecast sales (plan enrollments) by county, plan type, and demographic cohorts, using claims as predictors (e.g., high preventive claims = sticky sales).
+Identify triggers (e.g., HMO enrollment spikes linked to ER claim surges).
+
+
+Automation:
+
+Fully automated—no manual category setup or babysitting.
+AI agent runs daily, processes new data, detects outliers, and updates cohorts.
+Outputs (outliers, cohort insights) saved as JSON or tables for Power BI.
+
+
+Visualization:
+
+Use Power BI for dashboards (20–35+ potential dashboards).
+Examples: ER claim spikes by county, preventive care trends by age/plan, outlier alerts, sales forecasts by region.
+Integrate via Databricks: Save AI outputs to Delta tables, pull into Power BI via gateway, or embed Python visuals for live updates.
+
+
+
+Technical Preferences:
+
+Databricks: Use Spark SQL for simple queries (e.g., flag outliers with standard deviation) or PySpark for advanced ML (e.g., IsolationForest for anomaly detection).
+No aggregation: Keep claims at row-level for granular outlier detection.
+Scalability: Handle millions of records across hundreds of categories.
