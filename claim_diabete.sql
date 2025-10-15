@@ -167,7 +167,7 @@ SELECT
               OR UPPER(COALESCE(PROC_DESC, '')) LIKE '%ENDOCRINOLOGY%')
         THEN COALESCE(GL_AMT, 0) ELSE 0 END) AS specialist_visit_amt_2025,
 
-    -- Diabetes flag (fixed)
+    -- Diabetes flag (no DIAG_CD)
     MAX(CASE
         WHEN EXISTS (
             SELECT 1
@@ -189,7 +189,6 @@ SELECT
                 FROM hive_metastore.off_orig.claims_member sub2
                 WHERE sub2.CLAIM_ID = sub.CLAIM_ID
                 AND (
-                    sub2.DIAG_CD LIKE 'E10%' OR sub2.DIAG_CD LIKE 'E11%' OR sub2.DIAG_CD LIKE '250%' OR
                     UPPER(COALESCE(sub2.PROC_DESC, '')) LIKE '%DIABETES%' OR
                     UPPER(COALESCE(sub2.PROC_DESC, '')) LIKE '%DIABETIC%' OR
                     UPPER(COALESCE(sub2.PROC_DESC, '')) LIKE '%INSULIN%' OR
@@ -200,7 +199,7 @@ SELECT
         )
         THEN 1 ELSE 0 END) AS has_diabetes_proc,
 
-    -- Cardiac (chronic heart failure) flag (fixed)
+    -- Cardiac (no DIAG_CD)
     MAX(CASE
         WHEN EXISTS (
             SELECT 1
@@ -215,7 +214,6 @@ SELECT
                 FROM hive_metastore.off_orig.claims_member sub2
                 WHERE sub2.CLAIM_ID = sub.CLAIM_ID
                 AND (
-                    sub2.DIAG_CD LIKE 'I50%' OR sub2.DIAG_CD LIKE 'I11.0%' OR sub2.DIAG_CD LIKE '428%' OR
                     UPPER(COALESCE(sub2.PROC_DESC, '')) LIKE '%HEART FAILURE%' OR
                     UPPER(COALESCE(sub2.PROC_DESC, '')) LIKE '%CONGESTIVE HEART FAILURE%' OR
                     UPPER(COALESCE(sub2.PROC_DESC, '')) LIKE '%CHF%' OR
@@ -225,7 +223,7 @@ SELECT
         )
         THEN 1 ELSE 0 END) AS has_cardiac_proc,
 
-    -- COPD flag (fixed)
+    -- COPD (no DIAG_CD)
     MAX(CASE
         WHEN EXISTS (
             SELECT 1
@@ -239,8 +237,6 @@ SELECT
                 FROM hive_metastore.off_orig.claims_member sub2
                 WHERE sub2.CLAIM_ID = sub.CLAIM_ID
                 AND (
-                    sub2.DIAG_CD LIKE 'J44%' OR sub2.DIAG_CD LIKE '491%' OR sub2.DIAG_CD LIKE '492%' OR 
-                    sub2.DIAG_CD LIKE '496%' OR
                     UPPER(COALESCE(sub2.PROC_DESC, '')) LIKE '%CHRONIC OBSTRUCTIVE%' OR
                     UPPER(COALESCE(sub2.PROC_DESC, '')) LIKE '%COPD%' OR
                     UPPER(COALESCE(sub2.PROC_DESC, '')) LIKE '%EMPHYSEMA%' OR
