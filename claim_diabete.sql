@@ -64,6 +64,7 @@ SELECT
         WHEN YEAR(PROC_DT) = 2025 AND 
              (UPPER(COALESCE(PROC_DESC, '')) LIKE '%EMERGENCY%' 
               OR UPPER(COALESCE(PROC_DESC, '')) LIKE '%ER %' 
+              OR UPPER(COALESCE(PROC_DESC, '')) LIKE '% ER%' 
               OR UPPER(PROC_DESC) LIKE '%URGENT%' 
               OR UPPER(PROC_DESC) LIKE '%TRAUMA%')
         THEN COALESCE(GL_AMT, 0) ELSE 0 END) AS er_visit_amt_2025,
@@ -166,13 +167,13 @@ SELECT
               OR UPPER(COALESCE(PROC_DESC, '')) LIKE '%ENDOCRINOLOGY%')
         THEN COALESCE(GL_AMT, 0) ELSE 0 END) AS specialist_visit_amt_2025,
 
-    -- Diabetes flag (improved)
+    -- Diabetes flag (fixed)
     MAX(CASE
-        WHEN (
-            -- ICD-10 or ICD-9 diagnosis codes
-            DIAG_CD LIKE 'E10%' OR DIAG_CD LIKE 'E11%' OR DIAG_CD LIKE '250%' OR
-            -- Procedure codes
-            PROC_CD IN (
+        WHEN EXISTS (
+            SELECT 1
+            FROM hive_metastore.off_orig.claims_member sub
+            WHERE sub.CLAIM_ID = main.CLAIM_ID
+            AND sub.PROC_CD IN (
                 '82948', 'D0412', 'J1814', 'S9140', 'S9460', '3E013VG', 'G9887', 'A9274', 'S9455', 'S9214',
                 '3051F', 'J1815', '83525', 'A4772', 'G9147', '82947', 'A4224', '86337', '82950', '3754F',
                 'S5551', '0447T', '3E033VG', 'S9141', 'D0411', 'S5561', '3E053VG', 'A9552', 'A4225', 'G9886',
@@ -182,50 +183,70 @@ SELECT
                 'M1372', 'A4232', '0468U', 'G2089', 'A4231', 'S5550', 'A4255', '83036', '3052F', 'M1212',
                 'G0246', 'M1373', '80424', 'S9465', '95251', 'G0245', '3045F', 'S5552', '80422', 'S5571',
                 '82949', '83527', 'J1817', '3E043VG', 'J1811'
-            ) OR
-            -- Description keywords
-            UPPER(COALESCE(PROC_DESC, '')) LIKE '%DIABETES%' OR
-            UPPER(COALESCE(PROC_DESC, '')) LIKE '%DIABETIC%' OR
-            UPPER(COALESCE(PROC_DESC, '')) LIKE '%GLUCOSE%' OR
-            UPPER(COALESCE(PROC_DESC, '')) LIKE '%A1C%' OR
-            UPPER(COALESCE(PROC_DESC, '')) LIKE '%HBA1C%' OR
-            UPPER(COALESCE(PROC_DESC, '')) LIKE '%BLOOD SUGAR%' OR
-            UPPER(COALESCE(PROC_DESC, '')) LIKE '%INSULIN%'
+            )
+            AND EXISTS (
+                SELECT 1
+                FROM hive_metastore.off_orig.claims_member sub2
+                WHERE sub2.CLAIM_ID = sub.CLAIM_ID
+                AND (
+                    sub2.DIAG_CD LIKE 'E10%' OR sub2.DIAG_CD LIKE 'E11%' OR sub2.DIAG_CD LIKE '250%' OR
+                    UPPER(COALESCE(sub2.PROC_DESC, '')) LIKE '%DIABETES%' OR
+                    UPPER(COALESCE(sub2.PROC_DESC, '')) LIKE '%DIABETIC%' OR
+                    UPPER(COALESCE(sub2.PROC_DESC, '')) LIKE '%INSULIN%' OR
+                    UPPER(COALESCE(sub2.PROC_DESC, '')) LIKE '%HBA1C%' OR
+                    UPPER(COALESCE(sub2.PROC_DESC, '')) LIKE '%A1C%'
+                )
+            )
         )
         THEN 1 ELSE 0 END) AS has_diabetes_proc,
 
-    -- Cardiac (chronic heart failure) flag (improved)
+    -- Cardiac (chronic heart failure) flag (fixed)
     MAX(CASE
-        WHEN (
-            -- ICD-10 or ICD-9 diagnosis codes
-            DIAG_CD LIKE 'I50%' OR DIAG_CD LIKE 'I11.0%' OR DIAG_CD LIKE '428%' OR
-            -- Procedure codes
-            PROC_CD IN (
+        WHEN EXISTS (
+            SELECT 1
+            FROM hive_metastore.off_orig.claims_member sub
+            WHERE sub.CLAIM_ID = main.CLAIM_ID
+            AND sub.PROC_CD IN (
                 '99211', '99212', '99213', '99214', '99215', '93005', '93010', '93018', '83880', 
                 '93306', '93350', 'J2785', '4040F', '98925', '93000', '99406', '80061', '82565'
-            ) OR
-            -- Description keywords
-            UPPER(COALESCE(PROC_DESC, '')) LIKE '%HEART FAILURE%' OR
-            UPPER(COALESCE(PROC_DESC, '')) LIKE '%CONGESTIVE HEART FAILURE%' OR
-            UPPER(COALESCE(PROC_DESC, '')) LIKE '%CHF%' OR
-            UPPER(COALESCE(PROC_DESC, '')) LIKE '%CARDIAC DECOMPENSATION%'
+            )
+            AND EXISTS (
+                SELECT 1
+                FROM hive_metastore.off_orig.claims_member sub2
+                WHERE sub2.CLAIM_ID = sub.CLAIM_ID
+                AND (
+                    sub2.DIAG_CD LIKE 'I50%' OR sub2.DIAG_CD LIKE 'I11.0%' OR sub2.DIAG_CD LIKE '428%' OR
+                    UPPER(COALESCE(sub2.PROC_DESC, '')) LIKE '%HEART FAILURE%' OR
+                    UPPER(COALESCE(sub2.PROC_DESC, '')) LIKE '%CONGESTIVE HEART FAILURE%' OR
+                    UPPER(COALESCE(sub2.PROC_DESC, '')) LIKE '%CHF%' OR
+                    UPPER(COALESCE(sub2.PROC_DESC, '')) LIKE '%CARDIAC DECOMPENSATION%'
+                )
+            )
         )
         THEN 1 ELSE 0 END) AS has_cardiac_proc,
 
-    -- COPD flag (improved)
+    -- COPD flag (fixed)
     MAX(CASE
-        WHEN (
-            -- ICD-10 or ICD-9 diagnosis codes
-            DIAG_CD LIKE 'J44%' OR DIAG_CD LIKE '491%' OR DIAG_CD LIKE '492%' OR DIAG_CD LIKE '496%' OR
-            -- Procedure codes
-            PROC_CD IN (
+        WHEN EXISTS (
+            SELECT 1
+            FROM hive_metastore.off_orig.claims_member sub
+            WHERE sub.CLAIM_ID = main.CLAIM_ID
+            AND sub.PROC_CD IN (
                 '99213', '94640', '94668', 'J7620', 'J7615', '83020', '94010', '94060', '94664', '94729'
-            ) OR
-            -- Description keywords
-            UPPER(COALESCE(PROC_DESC, '')) LIKE '%CHRONIC OBSTRUCTIVE%' OR
-            UPPER(COALESCE(PROC_DESC, '')) LIKE '%COPD%' OR
-            UPPER(COALESCE(PROC_DESC, '')) LIKE '%EMPHYSEMA%' OR
-            UPPER(COALESCE(PROC_DESC, '')) LIKE '%CHRONIC BRONCHITIS%'
+            )
+            AND EXISTS (
+                SELECT 1
+                FROM hive_metastore.off_orig.claims_member sub2
+                WHERE sub2.CLAIM_ID = sub.CLAIM_ID
+                AND (
+                    sub2.DIAG_CD LIKE 'J44%' OR sub2.DIAG_CD LIKE '491%' OR sub2.DIAG_CD LIKE '492%' OR 
+                    sub2.DIAG_CD LIKE '496%' OR
+                    UPPER(COALESCE(sub2.PROC_DESC, '')) LIKE '%CHRONIC OBSTRUCTIVE%' OR
+                    UPPER(COALESCE(sub2.PROC_DESC, '')) LIKE '%COPD%' OR
+                    UPPER(COALESCE(sub2.PROC_DESC, '')) LIKE '%EMPHYSEMA%' OR
+                    UPPER(COALESCE(sub2.PROC_DESC, '')) LIKE '%CHRONIC BRONCHITIS%'
+                )
+            )
         )
         THEN 1 ELSE 0 END) AS has_copd_proc,
 
@@ -234,6 +255,6 @@ SELECT
     MAX(PROC_DT) AS last_claim_date,
     COUNT(DISTINCT YEAR(PROC_DT)) AS claim_years_active,
     COUNT(DISTINCT SRC_SYS_CD) AS claim_source_systems
-FROM hive_metastore.off_orig.claims_member
+FROM hive_metastore.off_orig.claims_member main
 WHERE GL_AMT IS NOT NULL
 GROUP BY MembershipNumber
