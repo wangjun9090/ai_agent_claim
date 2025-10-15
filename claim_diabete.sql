@@ -167,64 +167,62 @@ SELECT
               OR UPPER(COALESCE(PROC_DESC, '')) LIKE '%ENDOCRINOLOGY%')
         THEN COALESCE(GL_AMT, 0) ELSE 0 END) AS specialist_visit_amt_2025,
 
-    -- Diabetes flag (fixed - stricter keywords, no HBA1C/A1C/DM)
+    -- Diabetes flag (fixed - reinstate HBA1C/A1C/DM, expanded codes)
     MAX(CASE
         WHEN EXISTS (
             SELECT 1
             FROM hive_metastore.off_orig.claims_member sub
             WHERE sub.CLAIM_ID = main.CLAIM_ID
             AND sub.PROC_CD IN (
-                '83036', 'J1815', 'J1817', '95251', 'G0245', 'G0246', 'S9465', 'A9274', 'E0607', 'A4224'
+                '83036', '82947', 'J1815', 'J1817', '95251', 'G0245', 'G0246', 'S9465', 'A9274', 'A9275',
+                'E0607', 'E0784', 'E0787', 'A4224', 'A4225', 'A4230', 'A4231', 'A4232', 'S5550', 'S5551',
+                '95249', '3044F', '3045F', '3046F', '99214'
             )
             AND (
                 UPPER(COALESCE(sub.PROC_DESC, '')) LIKE '%DIABETES%' OR
                 UPPER(COALESCE(sub.PROC_DESC, '')) LIKE '%DIABETIC%' OR
                 UPPER(COALESCE(sub.PROC_DESC, '')) LIKE '%INSULIN%' OR
+                UPPER(COALESCE(sub.PROC_DESC, '')) LIKE '%HBA1C%' OR
+                UPPER(COALESCE(sub.PROC_DESC, '')) LIKE '%A1C%' OR
+                UPPER(COALESCE(sub.PROC_DESC, '')) LIKE '%DM%' OR
                 UPPER(COALESCE(sub.PROC_DESC, '')) LIKE '%TYPE 2 DIABETES%'
             )
-            AND UPPER(COALESCE(sub.PROC_DESC, '')) NOT LIKE '%SCREENING%'
-            AND UPPER(COALESCE(sub.PROC_DESC, '')) NOT LIKE '%PREVENTIVE%'
-            AND sub.PROC_CD NOT IN ('99211', '99212', '99213', '99214', '99215')
         )
         THEN 1 ELSE 0 END) AS has_diabetes_proc,
 
-    -- Cardiac flag (fixed - stricter keywords)
+    -- Cardiac flag (fixed - expanded codes, added keywords)
     MAX(CASE
         WHEN EXISTS (
             SELECT 1
             FROM hive_metastore.off_orig.claims_member sub
             WHERE sub.CLAIM_ID = main.CLAIM_ID
             AND sub.PROC_CD IN (
-                '83880', '93306', '93350', 'J2785', '93000'
+                '83880', '93306', '93350', 'J2785', '93000', '93005', '93010', '93018', '99214'
             )
             AND (
                 UPPER(COALESCE(sub.PROC_DESC, '')) LIKE '%HEART FAILURE%' OR
                 UPPER(COALESCE(sub.PROC_DESC, '')) LIKE '%CONGESTIVE HEART FAILURE%' OR
-                UPPER(COALESCE(sub.PROC_DESC, '')) LIKE '%CHF%'
+                UPPER(COALESCE(sub.PROC_DESC, '')) LIKE '%CHF%' OR
+                UPPER(COALESCE(sub.PROC_DESC, '')) LIKE '%CARDIAC FAILURE%'
             )
-            AND UPPER(COALESCE(sub.PROC_DESC, '')) NOT LIKE '%SCREENING%'
-            AND UPPER(COALESCE(sub.PROC_DESC, '')) NOT LIKE '%PREVENTIVE%'
-            AND sub.PROC_CD NOT IN ('99211', '99212', '99213', '99214', '99215')
         )
         THEN 1 ELSE 0 END) AS has_cardiac_proc,
 
-    -- COPD flag (fixed - stricter keywords)
+    -- COPD flag (fixed - expanded codes, added keywords)
     MAX(CASE
         WHEN EXISTS (
             SELECT 1
             FROM hive_metastore.off_orig.claims_member sub
             WHERE sub.CLAIM_ID = main.CLAIM_ID
             AND sub.PROC_CD IN (
-                '94640', '94668', 'J7620', 'J7615', '94010', '94060', '94664'
+                '94640', '94668', 'J7620', 'J7615', '94010', '94060', '94664', '99214'
             )
             AND (
                 UPPER(COALESCE(sub.PROC_DESC, '')) LIKE '%CHRONIC OBSTRUCTIVE%' OR
                 UPPER(COALESCE(sub.PROC_DESC, '')) LIKE '%COPD%' OR
-                UPPER(COALESCE(sub.PROC_DESC, '')) LIKE '%EMPHYSEMA%'
+                UPPER(COALESCE(sub.PROC_DESC, '')) LIKE '%EMPHYSEMA%' OR
+                UPPER(COALESCE(sub.PROC_DESC, '')) LIKE '%PULMONARY DISEASE%'
             )
-            AND UPPER(COALESCE(sub.PROC_DESC, '')) NOT LIKE '%SCREENING%'
-            AND UPPER(COALESCE(sub.PROC_DESC, '')) NOT LIKE '%PREVENTIVE%'
-            AND sub.PROC_CD NOT IN ('99211', '99212', '99213', '99214', '99215')
         )
         THEN 1 ELSE 0 END) AS has_copd_proc,
 
