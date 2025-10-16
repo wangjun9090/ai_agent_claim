@@ -1,3 +1,9 @@
-Three-Year Shift: C-SNP claims jump 120% (5k → 11k), PPO only 18% (7.6k → 9k)-but C-SNP is still the floor. 
-- Why? Heavy chronics moved from PPO; PPO emptied, C-SNP filled-no budget explosion, just redistribution. 
-- Bottom line: Keep transferring-every PPO patient into C-SNP saves ~$2k/year, keeps ICU from melting.
+Topic: "Company on Track: C-SNP Takes the Load, PPO/HMO Dries Up."
+Update Bullets:
+
+Three-Year Shift: C-SNP soars 120% ($5k → $11k), PPO up 18% ($7.6k → $9k), but C-SNP leads now—proof we’re moving bombs.
+Why: Heavy chronics drained from PPO ($9.9k → $9k, -10%) and HMO ($9.2k → $8.9k, -4%) into C-SNP—budget steady, just redistributed.
+Next Step: Finish the shift—every PPO/HMO patient to C-SNP saves $2k/year, locks ICU costs down 20%.
+
+
+Visual: Keep the three bars, add a small arrow from PPO/HMO to C-SNP with "Keep Pushing" text
