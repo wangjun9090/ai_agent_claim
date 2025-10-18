@@ -1,90 +1,85 @@
-WITH high_risk_diabetes AS (
-    -- Identify high-risk diabetic members with PPO plan and high claim amounts
+WITH high_risk_diabetes_2023 AS (
     SELECT DISTINCT MembershipNumber AS member_id
     FROM hive_metastore.off_orig.enhanced_member_features
     WHERE has_diabetes_proc = 1
         AND plan_type = 'PPO'
-        AND claim_amt_2025 >= (
-            SELECT PERCENTILE_APPROX(claim_amt_2025, 0.95)
+        AND claim_amt_2023 >= (
+            SELECT PERCENTILE_APPROX(claim_amt_2023, 0.95)
             FROM hive_metastore.off_orig.enhanced_member_features
             WHERE plan_type = 'PPO'
         )
+        AND PROC_DT BETWEEN '2023-01-01' AND '2023-12-31'
 ),
 glucose_tests_2023_24 AS (
-    -- Retrieve glucose tests for high-risk members in 2023-2024
     SELECT c.MembershipNumber AS member_id, c.PROC_DT AS test_date
     FROM hive_metastore.off_orig.claims_member c
-    INNER JOIN high_risk_diabetes dm ON c.MembershipNumber = dm.member_id
+    INNER JOIN high_risk_diabetes_2023 dm ON c.MembershipNumber = dm.member_id
     WHERE c.PROC_CD IN ('83036', '82947')
         AND c.PROC_DT BETWEEN '2023-01-01' AND '2024-12-31'
 ),
 latest_test AS (
-    -- Determine the most recent glucose test date per member
     SELECT member_id, MAX(test_date) AS last_test
     FROM glucose_tests_2023_24
     GROUP BY member_id
 ),
 skip_group AS (
-    -- Group 1: Members with no tests within the last 90 days or before 2024
     SELECT dm.member_id,
            CASE WHEN lt.last_test IS NULL OR lt.last_test < '2024-01-01' THEN 1 ELSE 0 END AS skip_flag
-    FROM high_risk_diabetes dm
+    FROM high_risk_diabetes_2023 dm
     LEFT JOIN latest_test lt ON dm.member_id = lt.member_id
     WHERE CASE WHEN lt.last_test IS NULL OR lt.last_test < '2024-01-01' THEN 1 ELSE 0 END = 1
 ),
 not_skip_group AS (
-    -- Group 2: Members with tests in 2024
     SELECT dm.member_id,
            CASE WHEN lt.last_test >= '2024-01-01' THEN 1 ELSE 0 END AS skip_flag
-    FROM high_risk_diabetes dm
+    FROM high_risk_diabetes_2023 dm
     LEFT JOIN latest_test lt ON dm.member_id = lt.member_id
     WHERE CASE WHEN lt.last_test >= '2024-01-01' THEN 1 ELSE 0 END = 1
 ),
-hospital_claims AS (
-    -- Hospital and ICU claims for 2023-2024
+hospital_claims_2025 AS (
     SELECT c.MembershipNumber AS member_id,
            c.PROC_DT AS visit_date,
-           c.claim_amt AS cost,
-           CASE WHEN c.LOS >= 3 OR c.PROC_CD LIKE '99291%' THEN 'ICU' ELSE 'Hospital' END AS type
+           c.GL_AMT AS cost,
+           CASE WHEN c.PROC_CD LIKE '99291%' THEN 'ICU' ELSE 'Hospital' END AS type
     FROM hive_metastore.off_orig.claims_member c
-    WHERE c.PLSRV_CD = '21' -- inpatient
-        AND c.PROC_DT BETWEEN '2023-01-01' AND '2024-12-31'
+    WHERE c.PLSRV_CD LIKE '%21%'
+        AND c.PROC_DT BETWEEN '2025-01-01' AND '2025-10-18'
 ),
 skip_hospital AS (
-    -- Hospital and ICU stats for skip test group
-    SELECT 'Skip Test' AS group_name,
-           COUNT(DISTINCT member_id) AS num_people,
+    SELECT 'Skip Test 2023' AS group_name,
+           COUNT(DISTINCT hc.member_id) AS num_people,
            COUNT(*) AS num_visits,
            SUM(cost) AS total_cost,
-           SUM(CASE WHEN type = 'ICU' THEN cost ELSE 0 END) AS total_icu_cost,
-           COUNT(CASE WHEN type = 'ICU' THEN 1 END) AS num_icu
-    FROM hospital_claims hc
+           SUM(CASE WHEN type LIKE '%ICU%' THEN cost ELSE 0 END) AS total_icu_cost,
+           COUNT(CASE WHEN type LIKE '%ICU%' THEN 1 END) AS num_icu
+    FROM hospital_claims_2025 hc
     INNER JOIN skip_group sg ON hc.member_id = sg.member_id
 ),
 not_skip_hospital AS (
-    -- Hospital and ICU stats for not skip test group
-    SELECT 'Not Skip Test' AS group_name,
-           COUNT(DISTINCT member_id) AS num_people,
+    SELECT 'Not Skip Test 2023' AS group_name,
+           COUNT(DISTINCT hc.member_id) AS num_people,
            COUNT(*) AS num_visits,
            SUM(cost) AS total_cost,
-           SUM(CASE WHEN type = 'ICU' THEN cost ELSE 0 END) AS total_icu_cost,
-           COUNT(CASE WHEN type = 'ICU' THEN 1 END) AS num_icu
-    FROM hospital_claims hc
+           SUM(CASE WHEN type LIKE '%ICU%' THEN cost ELSE 0 END) AS total_icu_cost,
+           COUNT(CASE WHEN type LIKE '%ICU%' THEN 1 END) AS num_icu
+    FROM hospital_claims_2025 hc
     INNER JOIN not_skip_group sg ON hc.member_id = sg.member_id
 ),
 groups_combined AS (
-    -- Combine stats from both groups
     SELECT * FROM skip_hospital
     UNION ALL
     SELECT * FROM not_skip_hospital
 ),
 risk_projection AS (
-    -- Project costs and visits if all 1668 members skipped tests
-    SELECT s.num_icu * (1668.0 / COUNT(sg.member_id)) AS projected_skip_icu_count,
-           s.total_icu_cost * (1668.0 / COUNT(sg.member_id)) AS projected_skip_icu_cost,
-           s.num_visits * (1668.0 / COUNT(sg.member_id)) AS projected_skip_visits,
-           s.total_cost * (1668.0 / COUNT(sg.member_id)) AS projected_skip_total_cost
-    FROM skip_hospital s, skip_group sg
+    SELECT 
+        s.num_icu * (1668.0 / sg.skip_count) AS projected_skip_icu_count,
+        s.total_icu_cost * (1668.0 / sg.skip_count) AS projected_skip_icu_cost,
+        s.num_visits * (1668.0 / sg.skip_count) AS projected_skip_visits,
+        s.total_cost * (1668.0 / sg.skip_count) AS projected_skip_total_cost
+    FROM skip_hospital s
+    CROSS JOIN (
+        SELECT COUNT(*) AS skip_count FROM skip_group
+    ) sg
 )
 SELECT group_name, num_people, num_visits, total_cost, total_icu_cost, num_icu
 FROM groups_combined
@@ -95,4 +90,4 @@ SELECT 'Projected: All 1668 Skip' AS group_name,
        projected_skip_total_cost,
        projected_skip_icu_cost,
        projected_skip_icu_count
-FROM risk_projection
+FROM risk_projection;
