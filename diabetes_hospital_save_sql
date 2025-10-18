@@ -40,41 +40,39 @@ hospital_claims_2025 AS (
     SELECT c.MembershipNumber AS member_id,
            c.PROC_DT AS visit_date,
            c.GL_AMT AS line_cost,
-           ROW_NUMBER() OVER (PARTITION BY c.MembershipNumber, c.PROC_DT ORDER BY c.PROC_CD) AS rn,
            CASE WHEN c.PROC_CD LIKE '99291%' THEN 'ICU' ELSE 'Hospital' END AS type
     FROM hive_metastore.off_orig.claims_member c
     WHERE c.PLSRV_CD LIKE '%21%'
         AND c.PROC_DT BETWEEN '2025-01-01' AND '2025-10-18'
 ),
-hospital_visits_2025 AS (
+icu_visits_2025 AS (
     SELECT member_id,
            visit_date,
-           MAX(CASE WHEN type = 'ICU' THEN line_cost ELSE 0 END) AS icu_cost,
-           MAX(CASE WHEN type = 'Hospital' THEN line_cost ELSE 0 END) AS hospital_cost,
+           SUM(CASE WHEN type = 'ICU' THEN line_cost ELSE 0 END) AS icu_cost,
+           SUM(CASE WHEN type = 'Hospital' THEN line_cost ELSE 0 END) AS hospital_cost,
            MAX(CASE WHEN type = 'ICU' THEN 1 ELSE 0 END) AS is_icu
     FROM hospital_claims_2025
     GROUP BY member_id, visit_date
 ),
 skip_hospital AS (
     SELECT 'Skip Test 2023' AS group_name,
-           COUNT(DISTINCT hv.member_id) AS num_people,
+           COUNT(DISTINCT iv.member_id) AS num_people,
            COUNT(*) AS num_visits,
-           SUM(hv.icu_cost + hv.hospital_cost) AS total_cost,
-           SUM(hv.icu_cost) AS total_icu_cost,
-           COUNT(CASE WHEN hv.is_icu = 1 THEN 1 END) AS num_icu
-    FROM hospital_visits_2025 hv
-    INNER JOIN skip_group sg ON hv.member_id = sg.member_id
+           SUM(iv.icu_cost + iv.hospital_cost) AS total_cost,
+           SUM(iv.icu_cost) AS total_icu_cost,
+           COUNT(CASE WHEN iv.is_icu = 1 THEN 1 END) AS num_icu
+    FROM icu_visits_2025 iv
+    INNER JOIN skip_group sg ON iv.member_id = sg.member_id
 ),
 not_skip_hospital AS (
     SELECT 'Not Skip Test 2023' AS group_name,
-           COUNT(DISTINCT hv.member_id) AS num_people,
-           COUNT(*) AS num_visits,
-           SUM(hv.icu_cost + hv.hospital_cost) AS total_cost,
-           SUM(hv.icu_cost) AS total_icu_cost,
-           COUNT(CASE WHEN hv.is_icu = 1 THEN 1 END) AS num_icu
-    FROM hospital_claims_2025 hc
-    INNER JOIN not_skip_group sg ON hc.member_id = sg.member_id
-    INNER JOIN hospital_visits_2025 hv ON hv.member_id = hc.member_id AND hv.visit_date = hc.visit_date
+    COUNT(DISTINCT iv.member_id) AS num_people,
+    COUNT(*) AS num_visits,
+    SUM(iv.icu_cost + iv.hospital_cost) AS total_cost,
+    SUM(iv.icu_cost) AS total_icu_cost,
+    COUNT(CASE WHEN iv.is_icu = 1 THEN 1 END) AS num_icu
+    FROM icu_visits_2025 iv
+    INNER JOIN not_skip_group sg ON iv.member_id = sg.member_id
 ),
 groups_combined AS (
     SELECT * FROM skip_hospital
