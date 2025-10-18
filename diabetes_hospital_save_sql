@@ -41,28 +41,16 @@ hospital_claims_2023_2025 AS (
     -- Collect all hospital claims (PLSRV_CD LIKE '%21%') from 2023 to 2025
     SELECT c.MembershipNumber AS member_id,
            c.PROC_DT AS visit_date,
-           c.GL_AMT AS line_cost,
            CASE WHEN c.PROC_CD LIKE '99291%' THEN 'ICU' ELSE 'Hospital' END AS type
     FROM hive_metastore.off_orig.claims_member c
     WHERE c.PLSRV_CD LIKE '%21%'
         AND c.PROC_DT BETWEEN '2023-01-01' AND '2025-10-18'
 ),
 
-icu_visits_2023_2025 AS (
-    -- Aggregate ICU-specific costs per visit
-    SELECT member_id,
-           visit_date,
-           SUM(CASE WHEN type = 'ICU' THEN line_cost ELSE 0 END) AS icu_total_cost,
-           MAX(CASE WHEN type = 'ICU' THEN 1 ELSE 0 END) AS is_icu
-    FROM hospital_claims_2023_2025
-    GROUP BY member_id, visit_date
-),
-
 all_visits_2023_2025 AS (
-    -- Aggregate total visit costs (ICU + Hospital) and define is_icu here
+    -- Aggregate total visits (ICU + Hospital) and define is_icu
     SELECT member_id,
            visit_date,
-           SUM(line_cost) AS total_visit_cost,
            MAX(CASE WHEN type = 'ICU' THEN 1 ELSE 0 END) AS is_icu
     FROM hospital_claims_2023_2025
     GROUP BY member_id, visit_date
@@ -73,12 +61,9 @@ skip_hospital AS (
     SELECT 'True Skip 2023-2025' AS group_name,
            COUNT(DISTINCT av.member_id) AS num_people,
            COUNT(*) AS num_visits,
-           ROUND(SUM(av.total_visit_cost), 2) AS total_cost,
-           ROUND(SUM(COALESCE(iv.icu_total_cost, 0)), 2) AS total_icu_cost,
            CAST(COUNT(CASE WHEN av.is_icu = 1 THEN 1 END) AS INTEGER) AS num_icu,
            CAST(COUNT(CASE WHEN av.is_icu = 0 THEN 1 END) AS INTEGER) AS num_hospital
     FROM all_visits_2023_2025 av
-    LEFT JOIN icu_visits_2023_2025 iv ON av.member_id = iv.member_id AND av.visit_date = iv.visit_date
     INNER JOIN true_skip_group sg ON av.member_id = sg.member_id
 ),
 
@@ -87,12 +72,9 @@ not_skip_hospital AS (
     SELECT 'Not Skip 2023-2025' AS group_name,
            COUNT(DISTINCT av.member_id) AS num_people,
            COUNT(*) AS num_visits,
-           ROUND(SUM(av.total_visit_cost), 2) AS total_cost,
-           ROUND(SUM(COALESCE(iv.icu_total_cost, 0)), 2) AS total_icu_cost,
            CAST(COUNT(CASE WHEN av.is_icu = 1 THEN 1 END) AS INTEGER) AS num_icu,
            CAST(COUNT(CASE WHEN av.is_icu = 0 THEN 1 END) AS INTEGER) AS num_hospital
     FROM all_visits_2023_2025 av
-    LEFT JOIN icu_visits_2023_2025 iv ON av.member_id = iv.member_id AND av.visit_date = iv.visit_date
     INNER JOIN high_risk_diabetes_2023 hs ON av.member_id = hs.member_id
     INNER JOIN has_any_test t ON av.member_id = t.member_id
 ),
@@ -104,12 +86,11 @@ groups_combined AS (
 ),
 
 risk_projection AS (
-    -- Project costs and visits for all 1668 skipping testing
+    -- Project visits for all 1668 skipping testing
     SELECT 
         s.num_icu * (1668.0 / sg.skip_count) AS projected_skip_icu_count,
-        ROUND(s.total_icu_cost * (1668.0 / sg.skip_count), 2) AS projected_skip_icu_cost,
-        ROUND(s.num_visits * (1668.0 / sg.skip_count), 2) AS projected_skip_visits,
-        ROUND(s.total_cost * (1668.0 / sg.skip_count), 2) AS projected_skip_total_cost
+        s.num_hospital * (1668.0 / sg.skip_count) AS projected_skip_hospital_count,
+        s.num_visits * (1668.0 / sg.skip_count) AS projected_skip_visits
     FROM skip_hospital s
     CROSS JOIN (
         SELECT COUNT(*) AS skip_count FROM true_skip_group
@@ -119,17 +100,13 @@ risk_projection AS (
 SELECT group_name,
        num_people,
        num_visits,
-       FORMAT_STRING(total_cost, '###,###,###,##0.00') AS total_cost,
-       FORMAT_STRING(total_icu_cost, '###,###,###,##0.00') AS total_icu_cost,
        num_icu,
        num_hospital
 FROM groups_combined
 UNION ALL
 SELECT 'Projected: All 1668 Skip' AS group_name,
        NULL AS num_people,
-       FORMAT_STRING(projected_skip_visits, '###,###,###,##0.00') AS num_visits,
-       FORMAT_STRING(projected_skip_total_cost, '###,###,###,##0.00') AS total_cost,
-       FORMAT_STRING(projected_skip_icu_cost, '###,###,###,##0.00') AS total_icu_cost,
+       CAST(projected_skip_visits AS INTEGER) AS num_visits,
        CAST(projected_skip_icu_count AS INTEGER) AS num_icu,
-       NULL AS num_hospital
+       CAST(projected_skip_hospital_count AS INTEGER) AS num_hospital
 FROM risk_projection;
