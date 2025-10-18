@@ -74,9 +74,9 @@ skip_hospital AS (
            COUNT(DISTINCT av.member_id) AS num_people,
            COUNT(*) AS num_visits,
            ROUND(SUM(av.total_visit_cost), 2) AS total_cost,
-           ROUND(SUM(iv.icu_total_cost), 2) AS total_icu_cost,
-           CAST(COUNT(CASE WHEN iv.is_icu = 1 THEN 1 END) AS INTEGER) AS num_icu,
-           CAST(COUNT(CASE WHEN iv.is_icu = 0 THEN 1 END) AS INTEGER) AS num_hospital
+           ROUND(SUM(COALESCE(iv.icu_total_cost, 0)), 2) AS total_icu_cost,
+           CAST(COUNT(CASE WHEN av.is_icu = 1 THEN 1 END) AS INTEGER) AS num_icu,
+           CAST(COUNT(CASE WHEN av.is_icu = 0 THEN 1 END) AS INTEGER) AS num_hospital
     FROM all_visits_2023_2025 av
     LEFT JOIN icu_visits_2023_2025 iv ON av.member_id = iv.member_id AND av.visit_date = iv.visit_date
     INNER JOIN true_skip_group sg ON av.member_id = sg.member_id
@@ -88,9 +88,9 @@ not_skip_hospital AS (
            COUNT(DISTINCT av.member_id) AS num_people,
            COUNT(*) AS num_visits,
            ROUND(SUM(av.total_visit_cost), 2) AS total_cost,
-           ROUND(SUM(iv.icu_total_cost), 2) AS total_icu_cost,
-           CAST(COUNT(CASE WHEN iv.is_icu = 1 THEN 1 END) AS INTEGER) AS num_icu,
-           CAST(COUNT(CASE WHEN iv.is_icu = 0 THEN 1 END) AS INTEGER) AS num_hospital
+           ROUND(SUM(COALESCE(iv.icu_total_cost, 0)), 2) AS total_icu_cost,
+           CAST(COUNT(CASE WHEN av.is_icu = 1 THEN 1 END) AS INTEGER) AS num_icu,
+           CAST(COUNT(CASE WHEN av.is_icu = 0 THEN 1 END) AS INTEGER) AS num_hospital
     FROM all_visits_2023_2025 av
     LEFT JOIN icu_visits_2023_2025 iv ON av.member_id = iv.member_id AND av.visit_date = iv.visit_date
     INNER JOIN high_risk_diabetes_2023 hs ON av.member_id = hs.member_id
@@ -119,17 +119,17 @@ risk_projection AS (
 SELECT group_name,
        num_people,
        num_visits,
-       FORMAT(total_cost, '###,###,###,##0.00') AS total_cost,
-       FORMAT(total_icu_cost, '###,###,###,##0.00') AS total_icu_cost,
+       FORMAT_STRING(total_cost, '###,###,###,##0.00') AS total_cost,
+       FORMAT_STRING(total_icu_cost, '###,###,###,##0.00') AS total_icu_cost,
        num_icu,
        num_hospital
 FROM groups_combined
 UNION ALL
 SELECT 'Projected: All 1668 Skip' AS group_name,
        NULL AS num_people,
-       FORMAT(projected_skip_visits, '###,###,###,##0.00') AS num_visits,
-       FORMAT(projected_skip_total_cost, '###,###,###,##0.00') AS total_cost,
-       FORMAT(projected_skip_icu_cost, '###,###,###,##0.00') AS total_icu_cost,
+       FORMAT_STRING(projected_skip_visits, '###,###,###,##0.00') AS num_visits,
+       FORMAT_STRING(projected_skip_total_cost, '###,###,###,##0.00') AS total_cost,
+       FORMAT_STRING(projected_skip_icu_cost, '###,###,###,##0.00') AS total_icu_cost,
        CAST(projected_skip_icu_count AS INTEGER) AS num_icu,
        NULL AS num_hospital
 FROM risk_projection;
