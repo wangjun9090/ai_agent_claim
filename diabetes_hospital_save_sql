@@ -13,27 +13,27 @@ WITH high_risk_diabetes_2023 AS (
         AND first_claim_date < '2024-01-01'
 ),
 
-glucose_tests_2023_2025 AS (
-    -- Capture all glucose tests (PROC_CD '83036' or '82947') from 2023 to 2025
+glucose_tests_2024_2025 AS (
+    -- Capture glucose tests only from 2024 to 2025
     SELECT c.MembershipNumber AS member_id, c.PROC_DT AS test_date
     FROM hive_metastore.off_orig.claims_member c
     INNER JOIN high_risk_diabetes_2023 dm ON c.MembershipNumber = dm.member_id
     WHERE c.PROC_CD IN ('83036', '82947')
-        AND c.PROC_DT BETWEEN '2023-01-01' AND '2025-10-18'
+        AND c.PROC_DT BETWEEN '2024-01-01' AND '2025-10-18'
 ),
 
-has_any_test AS (
-    -- Identify members with at least one glucose test
+has_any_test_2024_2025 AS (
+    -- Identify members with at least one glucose test in 2024-2025
     SELECT member_id
-    FROM glucose_tests_2023_2025
+    FROM glucose_tests_2024_2025
     GROUP BY member_id
 ),
 
 true_skip_group AS (
-    -- Define true skip group: high-risk members with no glucose tests from 2023-2025
+    -- Define skip group: high-risk members with no glucose tests in 2024-2025
     SELECT dm.member_id
     FROM high_risk_diabetes_2023 dm
-    LEFT JOIN has_any_test t ON dm.member_id = t.member_id
+    LEFT JOIN has_any_test_2024_2025 t ON dm.member_id = t.member_id
     WHERE t.member_id IS NULL
 ),
 
@@ -58,7 +58,7 @@ all_visits_2023_2025 AS (
 
 skip_hospital AS (
     -- Statistics for the true skip group
-    SELECT 'True Skip 2023-2025' AS group_name,
+    SELECT 'True Skip 2024-2025' AS group_name,
            COUNT(DISTINCT av.member_id) AS num_people,
            COUNT(*) AS num_visits,
            CAST(COUNT(CASE WHEN av.is_icu = 1 THEN 1 END) AS INTEGER) AS num_icu,
@@ -68,15 +68,15 @@ skip_hospital AS (
 ),
 
 not_skip_hospital AS (
-    -- Statistics for the non-skip group (those with at least one test)
-    SELECT 'Not Skip 2023-2025' AS group_name,
+    -- Statistics for the non-skip group (those with at least one test in 2024-2025)
+    SELECT 'Not Skip 2024-2025' AS group_name,
            COUNT(DISTINCT av.member_id) AS num_people,
            COUNT(*) AS num_visits,
            CAST(COUNT(CASE WHEN av.is_icu = 1 THEN 1 END) AS INTEGER) AS num_icu,
            CAST(COUNT(CASE WHEN av.is_icu = 0 THEN 1 END) AS INTEGER) AS num_hospital
     FROM all_visits_2023_2025 av
     INNER JOIN high_risk_diabetes_2023 hs ON av.member_id = hs.member_id
-    INNER JOIN has_any_test t ON av.member_id = t.member_id
+    INNER JOIN has_any_test_2024_2025 t ON av.member_id = t.member_id
 ),
 
 groups_combined AS (
