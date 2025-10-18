@@ -1,4 +1,5 @@
 WITH high_risk_diabetes_2023 AS (
+    -- Identify high-risk diabetes patients from 2023 based on top 5% claim costs
     SELECT DISTINCT MembershipNumber AS member_id
     FROM hive_metastore.off_orig.enhanced_member_features
     WHERE has_diabetes_proc = 1
@@ -8,95 +9,127 @@ WITH high_risk_diabetes_2023 AS (
             FROM hive_metastore.off_orig.enhanced_member_features
             WHERE plan_type = 'PPO'
         )
-        AND first_claim_date BETWEEN '2023-01-01' AND '2023-12-31'
+        AND first_claim_date >= '2023-01-01'
+        AND first_claim_date < '2024-01-01'
 ),
-glucose_tests_2023_24 AS (
+
+glucose_tests_2023_2025 AS (
+    -- Capture all glucose tests (PROC_CD '83036' or '82947') from 2023 to 2025
     SELECT c.MembershipNumber AS member_id, c.PROC_DT AS test_date
     FROM hive_metastore.off_orig.claims_member c
     INNER JOIN high_risk_diabetes_2023 dm ON c.MembershipNumber = dm.member_id
     WHERE c.PROC_CD IN ('83036', '82947')
-        AND c.PROC_DT BETWEEN '2023-01-01' AND '2024-12-31'
+        AND c.PROC_DT BETWEEN '2023-01-01' AND '2025-10-18'
 ),
-latest_test AS (
-    SELECT member_id, MAX(test_date) AS last_test
-    FROM glucose_tests_2023_24
+
+has_any_test AS (
+    -- Identify members with at least one glucose test
+    SELECT member_id
+    FROM glucose_tests_2023_2025
     GROUP BY member_id
 ),
-skip_group AS (
-    SELECT dm.member_id,
-           CASE WHEN lt.last_test IS NULL OR lt.last_test < '2024-01-01' THEN 1 ELSE 0 END AS skip_flag
+
+true_skip_group AS (
+    -- Define true skip group: high-risk members with no glucose tests from 2023-2025
+    SELECT dm.member_id
     FROM high_risk_diabetes_2023 dm
-    LEFT JOIN latest_test lt ON dm.member_id = lt.member_id
-    WHERE CASE WHEN lt.last_test IS NULL OR lt.last_test < '2024-01-01' THEN 1 ELSE 0 END = 1
+    LEFT JOIN has_any_test t ON dm.member_id = t.member_id
+    WHERE t.member_id IS NULL
 ),
-not_skip_group AS (
-    SELECT dm.member_id,
-           CASE WHEN lt.last_test >= '2024-01-01' THEN 1 ELSE 0 END AS skip_flag
-    FROM high_risk_diabetes_2023 dm
-    LEFT JOIN latest_test lt ON dm.member_id = lt.member_id
-    WHERE CASE WHEN lt.last_test >= '2024-01-01' THEN 1 ELSE 0 END = 1
-),
-hospital_claims_2025 AS (
+
+hospital_claims_2023_2025 AS (
+    -- Collect all hospital claims (PLSRV_CD LIKE '%21%') from 2023 to 2025
     SELECT c.MembershipNumber AS member_id,
            c.PROC_DT AS visit_date,
            c.GL_AMT AS line_cost,
            CASE WHEN c.PROC_CD LIKE '99291%' THEN 'ICU' ELSE 'Hospital' END AS type
     FROM hive_metastore.off_orig.claims_member c
     WHERE c.PLSRV_CD LIKE '%21%'
-        AND c.PROC_DT BETWEEN '2025-01-01' AND '2025-10-18'
+        AND c.PROC_DT BETWEEN '2023-01-01' AND '2025-10-18'
 ),
-icu_visits_2025 AS (
+
+icu_visits_2023_2025 AS (
+    -- Aggregate ICU-specific costs per visit
     SELECT member_id,
            visit_date,
-           SUM(CASE WHEN type = 'ICU' THEN line_cost ELSE 0 END) AS icu_cost,
-           SUM(CASE WHEN type = 'Hospital' THEN line_cost ELSE 0 END) AS hospital_cost,
+           SUM(CASE WHEN type = 'ICU' THEN line_cost ELSE 0 END) AS icu_total_cost,
            MAX(CASE WHEN type = 'ICU' THEN 1 ELSE 0 END) AS is_icu
-    FROM hospital_claims_2025
+    FROM hospital_claims_2023_2025
     GROUP BY member_id, visit_date
 ),
+
+all_visits_2023_2025 AS (
+    -- Aggregate total visit costs (ICU + Hospital)
+    SELECT member_id,
+           visit_date,
+           SUM(line_cost) AS total_visit_cost,
+           MAX(is_icu) AS is_icu
+    FROM hospital_claims_2023_2025
+    GROUP BY member_id, visit_date
+),
+
 skip_hospital AS (
-    SELECT 'Skip Test 2023' AS group_name,
-           COUNT(DISTINCT iv.member_id) AS num_people,
+    -- Statistics for the true skip group
+    SELECT 'True Skip 2023-2025' AS group_name,
+           COUNT(DISTINCT av.member_id) AS num_people,
            COUNT(*) AS num_visits,
-           SUM(iv.icu_cost + iv.hospital_cost) AS total_cost,
-           SUM(iv.icu_cost) AS total_icu_cost,
-           COUNT(CASE WHEN iv.is_icu = 1 THEN 1 END) AS num_icu
-    FROM icu_visits_2025 iv
-    INNER JOIN skip_group sg ON iv.member_id = sg.member_id
+           ROUND(SUM(av.total_visit_cost), 2) AS total_cost,
+           ROUND(SUM(iv.icu_total_cost), 2) AS total_icu_cost,
+           CAST(COUNT(CASE WHEN iv.is_icu = 1 THEN 1 END) AS INTEGER) AS num_icu,
+           CAST(COUNT(CASE WHEN iv.is_icu = 0 THEN 1 END) AS INTEGER) AS num_hospital
+    FROM all_visits_2023_2025 av
+    LEFT JOIN icu_visits_2023_2025 iv ON av.member_id = iv.member_id AND av.visit_date = iv.visit_date
+    INNER JOIN true_skip_group sg ON av.member_id = sg.member_id
 ),
+
 not_skip_hospital AS (
-    SELECT 'Not Skip Test 2023' AS group_name,
-    COUNT(DISTINCT iv.member_id) AS num_people,
-    COUNT(*) AS num_visits,
-    SUM(iv.icu_cost + iv.hospital_cost) AS total_cost,
-    SUM(iv.icu_cost) AS total_icu_cost,
-    COUNT(CASE WHEN iv.is_icu = 1 THEN 1 END) AS num_icu
-    FROM icu_visits_2025 iv
-    INNER JOIN not_skip_group sg ON iv.member_id = sg.member_id
+    -- Statistics for the non-skip group (those with at least one test)
+    SELECT 'Not Skip 2023-2025' AS group_name,
+           COUNT(DISTINCT av.member_id) AS num_people,
+           COUNT(*) AS num_visits,
+           ROUND(SUM(av.total_visit_cost), 2) AS total_cost,
+           ROUND(SUM(iv.icu_total_cost), 2) AS total_icu_cost,
+           CAST(COUNT(CASE WHEN iv.is_icu = 1 THEN 1 END) AS INTEGER) AS num_icu,
+           CAST(COUNT(CASE WHEN iv.is_icu = 0 THEN 1 END) AS INTEGER) AS num_hospital
+    FROM all_visits_2023_2025 av
+    LEFT JOIN icu_visits_2023_2025 iv ON av.member_id = iv.member_id AND av.visit_date = iv.visit_date
+    INNER JOIN high_risk_diabetes_2023 hs ON av.member_id = hs.member_id
+    INNER JOIN has_any_test t ON av.member_id = t.member_id
 ),
+
 groups_combined AS (
     SELECT * FROM skip_hospital
     UNION ALL
     SELECT * FROM not_skip_hospital
 ),
+
 risk_projection AS (
+    -- Project costs and visits for all 1668 skipping testing
     SELECT 
         s.num_icu * (1668.0 / sg.skip_count) AS projected_skip_icu_count,
-        s.total_icu_cost * (1668.0 / sg.skip_count) AS projected_skip_icu_cost,
-        s.num_visits * (1668.0 / sg.skip_count) AS projected_skip_visits,
-        s.total_cost * (1668.0 / sg.skip_count) AS projected_skip_total_cost
+        ROUND(s.total_icu_cost * (1668.0 / sg.skip_count), 2) AS projected_skip_icu_cost,
+        ROUND(s.num_visits * (1668.0 / sg.skip_count), 2) AS projected_skip_visits,
+        ROUND(s.total_cost * (1668.0 / sg.skip_count), 2) AS projected_skip_total_cost
     FROM skip_hospital s
     CROSS JOIN (
-        SELECT COUNT(*) AS skip_count FROM skip_group
+        SELECT COUNT(*) AS skip_count FROM true_skip_group
     ) sg
 )
-SELECT group_name, num_people, num_visits, total_cost, total_icu_cost, num_icu
+
+SELECT group_name,
+       num_people,
+       num_visits,
+       FORMAT(total_cost, '###,###,###,##0.00') AS total_cost,
+       FORMAT(total_icu_cost, '###,###,###,##0.00') AS total_icu_cost,
+       num_icu,
+       num_hospital
 FROM groups_combined
 UNION ALL
 SELECT 'Projected: All 1668 Skip' AS group_name,
        NULL AS num_people,
-       projected_skip_visits,
-       projected_skip_total_cost,
-       projected_skip_icu_cost,
-       projected_skip_icu_count
+       FORMAT(projected_skip_visits, '###,###,###,##0.00') AS num_visits,
+       FORMAT(projected_skip_total_cost, '###,###,###,##0.00') AS total_cost,
+       FORMAT(projected_skip_icu_cost, '###,###,###,##0.00') AS total_icu_cost,
+       CAST(projected_skip_icu_count AS INTEGER) AS num_icu,
+       NULL AS num_hospital
 FROM risk_projection;
