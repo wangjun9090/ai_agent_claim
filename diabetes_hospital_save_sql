@@ -17,64 +17,39 @@ WITH high_risk_any_year AS (
     AND plan_type = 'PPO'
 ),
 
-glucose_tests_2023_2025 AS (
+glucose_tests AS (
     -- Identify members with any glucose tests (PROC_CD '83036' or '82947') from 2023 to 2025
     SELECT DISTINCT MembershipNumber AS member_id
     FROM hive_metastore.off_orig.claims_member
-    WHERE PROC_CD IN ('83036', '82947')
+    WHERE PROC_CD IN ('83036', '82947')  -- A1C or random blood glucose tests
         AND PROC_DT BETWEEN '2023-01-01' AND '2025-10-18'
 ),
 
-true_skip_group AS (
+true_skip AS (
     -- Define true skip group: high-risk members with no glucose tests from 2023-2025
     SELECT h.member_id
     FROM high_risk_any_year h
-    LEFT JOIN glucose_tests_2023_2025 g ON h.member_id = g.member_id
-    WHERE g.member_id IS NULL
+    LEFT JOIN glucose_tests g ON h.member_id = g.member_id
+    WHERE g.member_id IS NULL  -- No tests in the entire period
 ),
 
-hospital_visits_2023_2025 AS (
-    -- Collect all ICU visits (PROC_CD LIKE '99291%') from 2023 to 2025, counted per day
-    SELECT member_id, PROC_DT AS visit_date
+icu_visits AS (
+    -- Collect all ICU visits with expanded criteria from 2023 to 2025
+    SELECT DISTINCT member_id, PROC_DT AS visit_date
     FROM hive_metastore.off_orig.claims_member
-    WHERE PLSRV_CD LIKE '%21%'
-        AND PROC_CD LIKE '99291%'
+    WHERE (PROC_CD LIKE '9929%' OR PLSRV_CD LIKE '%21%')  -- Broaden ICU definition
         AND PROC_DT BETWEEN '2023-01-01' AND '2025-10-18'
-),
-
-icu_counts AS (
-    -- Count ICU visits for true skip group vs. non-skip group
-    SELECT 'True Skip' AS group_name, COUNT(DISTINCT hv.visit_date) AS num_icu
-    FROM hospital_visits_2023_2025 hv
-    INNER JOIN true_skip_group sg ON hv.member_id = sg.member_id
-    GROUP BY ()
-
-    UNION ALL
-
-    SELECT 'Not Skip' AS group_name, COUNT(DISTINCT hv.visit_date) AS num_icu
-    FROM hospital_visits_2023_2025 hv
-    LEFT JOIN true_skip_group sg ON hv.member_id = sg.member_id
-    WHERE sg.member_id IS NULL
-),
-
-projection_1668 AS (
-    -- Project ICU visits if all 1668 skip testing
-    SELECT 'Projected: 1668 Skip' AS group_name,
-           CAST((s.num_icu * 1668.0 / sg.skip_count) AS INTEGER) AS num_icu
-    FROM (
-        SELECT COUNT(*) AS num_icu
-        FROM icu_counts
-        WHERE group_name = 'True Skip'
-    ) s
-    CROSS JOIN (
-        SELECT COUNT(*) AS skip_count
-        FROM true_skip_group
-    ) sg
+        AND DIAG_CD LIKE '%250%'  -- Filter for diabetes-related acute conditions
 )
 
--- Output the results
-SELECT group_name, num_icu
-FROM icu_counts
+-- Count ICU visits for true skip group vs. non-skip group
+SELECT 'True Skip' AS group_name, COUNT(DISTINCT iv.visit_date) AS num_icu
+FROM icu_visits iv
+INNER JOIN true_skip ts ON iv.member_id = ts.member_id
+
 UNION ALL
-SELECT group_name, num_icu
-FROM projection_1668;
+
+SELECT 'Not Skip' AS group_name, COUNT(DISTINCT iv.visit_date) AS num_icu
+FROM icu_visits iv
+LEFT JOIN true_skip ts ON iv.member_id = ts.member_id
+WHERE ts.member_id IS NULL;
