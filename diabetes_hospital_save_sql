@@ -59,11 +59,11 @@ icu_visits_2023_2025 AS (
 ),
 
 all_visits_2023_2025 AS (
-    -- Aggregate total visit costs (ICU + Hospital)
+    -- Aggregate total visit costs (ICU + Hospital) and define is_icu here
     SELECT member_id,
            visit_date,
            SUM(line_cost) AS total_visit_cost,
-           MAX(is_icu) AS is_icu
+           MAX(CASE WHEN type = 'ICU' THEN 1 ELSE 0 END) AS is_icu
     FROM hospital_claims_2023_2025
     GROUP BY member_id, visit_date
 ),
