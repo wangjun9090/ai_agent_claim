@@ -1,6 +1,6 @@
 WITH high_risk_any_year AS (
     -- Identify high-risk diabetes patients from 2023-2025 where any year's claim amount is in the top 5%
-    SELECT DISTINCT MembershipNumber AS member_id
+    SELECT DISTINCT CAST(MembershipNumber AS STRING) AS member_id
     FROM hive_metastore.off_orig.enhanced_member_features
     WHERE (
         claim_amt_2023 >= (SELECT PERCENTILE_APPROX(claim_amt_2023, 0.95)
@@ -18,38 +18,59 @@ WITH high_risk_any_year AS (
 ),
 
 glucose_tests AS (
-    -- Identify members with any glucose tests (PROC_CD '83036' or '82947') from 2023 to 2025
-    SELECT DISTINCT MembershipNumber AS member_id
+    -- Identify members with any glucose tests (PROC_CD '83036' or '82947') from 2024 to 2025
+    SELECT DISTINCT CAST(MembershipNumber AS STRING) AS member_id
     FROM hive_metastore.off_orig.claims_member
     WHERE PROC_CD IN ('83036', '82947')  -- A1C or random blood glucose tests
-        AND PROC_DT BETWEEN '2023-01-01' AND '2025-10-18'
+        AND PROC_DT BETWEEN '2024-01-01' AND '2025-10-18'
 ),
 
 true_skip AS (
-    -- Define true skip group: high-risk members with no glucose tests from 2023-2025
+    -- Define true skip group: high-risk members with no glucose tests from 2024-2025
     SELECT h.member_id
     FROM high_risk_any_year h
     LEFT JOIN glucose_tests g ON h.member_id = g.member_id
-    WHERE g.member_id IS NULL  -- No tests in the entire period
+    WHERE g.member_id IS NULL  -- No tests in the 2024-2025 period
 ),
 
-icu_visits AS (
-    -- Collect all ICU visits with expanded criteria from 2023 to 2025
-    SELECT DISTINCT member_id, PROC_DT AS visit_date
+hospital_visits AS (
+    -- Collect all hospital visits (ICU or general) with expanded criteria from 2023 to 2025
+    SELECT DISTINCT CAST(MembershipNumber AS STRING) AS member_id, PROC_DT AS visit_date,
+           CASE 
+               WHEN PROC_CD LIKE '9929%' OR PLSRV_CD LIKE '%ICU%' THEN 'ICU'
+               ELSE 'Hospital'
+           END AS visit_type
     FROM hive_metastore.off_orig.claims_member
-    WHERE (PROC_CD LIKE '9929%' OR PLSRV_CD LIKE '%21%')  -- Broaden ICU definition
+    WHERE (PROC_CD LIKE '9929%' OR PLSRV_CD LIKE '%21%' OR PLSRV_CD LIKE '%ICU%')
         AND PROC_DT BETWEEN '2023-01-01' AND '2025-10-18'
-        AND DIAG_CD LIKE '%250%'  -- Filter for diabetes-related acute conditions
+),
+
+visit_counts AS (
+    -- Count ICU and hospital visits for true skip, not skip, and overall high-risk groups
+    SELECT 'True Skip' AS group_name,
+           COUNT(DISTINCT CASE WHEN hv.visit_type = 'ICU' THEN hv.visit_date END) AS num_icu,
+           COUNT(DISTINCT CASE WHEN hv.visit_type = 'Hospital' THEN hv.visit_date END) AS num_hospital
+    FROM hospital_visits hv
+    INNER JOIN true_skip ts ON hv.member_id = ts.member_id
+
+    UNION ALL
+
+    SELECT 'Not Skip' AS group_name,
+           COUNT(DISTINCT CASE WHEN hv.visit_type = 'ICU' THEN hv.visit_date END) AS num_icu,
+           COUNT(DISTINCT CASE WHEN hv.visit_type = 'Hospital' THEN hv.visit_date END) AS num_hospital
+    FROM hospital_visits hv
+    LEFT JOIN true_skip ts ON hv.member_id = ts.member_id
+    WHERE ts.member_id IS NULL
+
+    UNION ALL
+
+    SELECT 'Top 5% High Risk' AS group_name,
+           COUNT(DISTINCT CASE WHEN hv.visit_type = 'ICU' THEN hv.visit_date END) AS num_icu,
+           COUNT(DISTINCT CASE WHEN hv.visit_type = 'Hospital' THEN hv.visit_date END) AS num_hospital
+    FROM hospital_visits hv
+    INNER JOIN high_risk_any_year hr ON hv.member_id = hr.member_id
 )
 
--- Count ICU visits for true skip group vs. non-skip group
-SELECT 'True Skip' AS group_name, COUNT(DISTINCT iv.visit_date) AS num_icu
-FROM icu_visits iv
-INNER JOIN true_skip ts ON iv.member_id = ts.member_id
-
-UNION ALL
-
-SELECT 'Not Skip' AS group_name, COUNT(DISTINCT iv.visit_date) AS num_icu
-FROM icu_visits iv
-LEFT JOIN true_skip ts ON iv.member_id = ts.member_id
-WHERE ts.member_id IS NULL;
+-- Output the results
+SELECT group_name, num_icu, num_hospital
+FROM visit_counts;
