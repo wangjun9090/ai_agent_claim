@@ -196,3 +196,39 @@ GROUP BY
 ORDER BY 
     total_cost DESC
 LIMIT 10;
+
+
+-- Identify ER visits for minor conditions (low/moderate E/M) without high-complexity justifying procedures
+SELECT 
+    a.claim_id,
+    collect_list(a.proc_cd) AS proc_codes,
+    collect_list(a.proc_desc) AS proc_descriptions,
+    COUNT(DISTINCT a.membershipNumber) AS patient_count,
+    AVG(a.GL_AMT) AS avg_cost,
+    SUM(a.GL_AMT) AS total_cost
+FROM 
+    claims a
+WHERE 
+    a.PLSRV_CD = '23'
+    AND EXISTS (
+        -- Check for low/moderate E/M codes indicating potential minor issues
+        SELECT 1 
+        FROM claims b 
+        WHERE b.claim_id = a.claim_id 
+        AND b.proc_cd IN ('99281', '99282', '99283')
+    )
+    AND NOT EXISTS (
+        -- Exclude claims with high-complexity E/M or critical care
+        SELECT 1 
+        FROM claims c 
+        WHERE c.claim_id = a.claim_id 
+        AND c.proc_cd IN (
+            '99284', '99285', -- High complexity E/M
+            '99291', '99292' -- Critical care
+        )
+    )
+GROUP BY 
+    a.claim_id
+ORDER BY 
+    total_cost DESC
+LIMIT 100;
