@@ -1,4 +1,4 @@
--- Identify inpatient stays longer than 4 days, summing costs
+--1 Identify inpatient stays longer than 4 days, summing costs
 SELECT 
     proc_cd,
     proc_desc,
@@ -19,7 +19,7 @@ ORDER BY
 LIMIT 10;
 
 
--- Find duplicate drug claims within 30 days for the same patient
+--2 Find duplicate drug claims within 30 days for the same patient
 SELECT 
     a.proc_cd,
     a.proc_desc,
@@ -44,7 +44,7 @@ GROUP BY
     a.NDC
 ORDER BY 
     total_cost DESC
--- Identify imaging procedures without fracture or stroke diagnosis
+--3 Identify imaging procedures without fracture or stroke diagnosis
 SELECT 
     proc_cd,
     proc_desc,
@@ -63,6 +63,8 @@ ORDER BY
     total_cost DESC
 LIMIT 10;
 LIMIT 10;
+
+--4  Identify nursing claims with excessive hours or duplicates
 
 -- Identify nursing claims with excessive hours or duplicates
 SELECT 
