@@ -64,25 +64,32 @@ ORDER BY
 LIMIT 10;
 LIMIT 10;
 
--- Identify nursing claims with billed hours exceeding audio log evidence
+-- Identify nursing claims with excessive hours or duplicates
 SELECT 
-    c.proc_cd,
-    c.proc_desc,
-    COUNT(DISTINCT c.patient_id) AS patient_count,
-    SUM(c.cost) AS total_cost
+    proc_cd,
+    proc_desc,
+    COUNT(DISTINCT patient_id) AS patient_count,
+    AVG(claimed_hours) AS avg_hours,
+    SUM(claimed_hours) AS total_hours,
+    SUM(cost) AS total_cost
 FROM 
-    claims c
+    claims
 WHERE 
-    c.revenue_code = '0255'
-    AND c.claimed_hours > (
-        SELECT COALESCE(TIMESTAMPDIFF(HOUR, start_audio, end_audio), 0)
-        FROM audio_log al
-        WHERE al.patient_id = c.patient_id
-        AND al.service_date = c.service_date
+    revenue_code = '0255'
+    AND (
+        claimed_hours > 4 -- Excessive hours threshold (adjust based on your data)
+        OR EXISTS (
+            SELECT 1
+            FROM claims b
+            WHERE b.patient_id = claims.patient_id
+            AND b.service_date = claims.service_date
+            AND b.revenue_code = '0255'
+            AND b.id != claims.id
+        )
     )
 GROUP BY 
-    c.proc_cd,
-    c.proc_desc
+    proc_cd,
+    proc_desc
 ORDER BY 
     total_cost DESC
 LIMIT 10;
