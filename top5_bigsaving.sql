@@ -137,3 +137,62 @@ GROUP BY
 ORDER BY 
     total_cost DESC
 LIMIT 10;
+
+-- Identify ER visits for minor conditions (low/moderate E/M) without justifying procedures
+SELECT 
+    claim_id,
+    GROUP_CONCAT(DISTINCT proc_cd SEPARATOR ', ') AS proc_codes,
+    GROUP_CONCAT(DISTINCT proc_desc SEPARATOR '; ') AS proc_descriptions,
+    COUNT(DISTINCT membershipNumber) AS patient_count,
+    AVG(GL_AMT) AS avg_cost,
+    SUM(GL_AMT) AS total_cost
+FROM 
+    claims a
+WHERE 
+    PLSRV_CD = '23'
+    AND EXISTS (
+        -- Check for low/moderate E/M codes indicating potential minor issues
+        SELECT 1 
+        FROM claims b 
+        WHERE b.claim_id = a.claim_id 
+        AND b.proc_cd IN ('99281', '99282', '99283')
+    )
+    AND NOT EXISTS (
+        -- Exclude claims with procedures justifying ER visit
+        SELECT 1 
+        FROM claims c 
+        WHERE c.claim_id = a.claim_id 
+        AND c.proc_cd IN (
+            '99284', '99285',           -- High complexity E/M
+            '99291', '99292',           -- Critical care
+            '96360', '96361',           -- IV hydration
+            '96365', '96366', '96367', '96368', -- IV infusion
+            '96372', '96373', '96374', '96375', '96376', '96377', '96379', -- Therapeutic injections
+            '12001', '12002', '12004', '12005', '12006', '12007', -- Simple laceration repair
+            '10060', '10061',           -- Incision and drainage
+            '29105', '29125', '29130', -- Splint application (arm, hand examples)
+            '10120', '10121',           -- Foreign body removal
+            '93000', '93005', '93010', -- EKG
+            '71045', '71046', '71047', '71048', -- Chest X-ray
+            '70450', '70460', '70470', -- CT head
+            '94640',                    -- Nebulizer treatment
+            '76705',                    -- Ultrasound abdomen limited
+            '25500'                     -- Closed treatment of radial shaft fracture
+        )
+    )
+    AND (
+        -- Optional: Keyword match in proc_desc for minor conditions
+        UPPER(proc_desc) LIKE '%HEADACHE%' 
+        OR UPPER(proc_desc) LIKE '%HEAD PAIN%' 
+        OR UPPER(proc_desc) LIKE '%COLD%' 
+        OR UPPER(proc_desc) LIKE '%URI%' 
+        OR UPPER(proc_desc) LIKE '%UPPER RESPIRATORY%' 
+        OR UPPER(proc_desc) LIKE '%MINOR%' 
+        OR UPPER(proc_desc) LIKE '%BRONCHITIS%' 
+        OR UPPER(proc_desc) LIKE '%SPRAIN%'
+    )
+GROUP BY 
+    claim_id
+ORDER BY 
+    total_cost DESC
+LIMIT 10;
