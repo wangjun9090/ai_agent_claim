@@ -93,3 +93,45 @@ GROUP BY
 ORDER BY 
     total_cost DESC
 LIMIT 10;
+
+
+-- Identify upcoded inpatient procedures (e.g., 99233 without complex diagnoses)
+SELECT 
+    proc_cd,
+    proc_desc,
+    COUNT(DISTINCT patient_id) AS patient_count,
+    SUM(cost) AS total_cost
+FROM 
+    claims
+WHERE 
+    place_code = '21'
+    AND proc_cd IN ('99233', '99239') -- High-complexity hospital care or discharge
+    AND diagnosis_code NOT LIKE 'I2%' -- Exclude complex heart conditions
+    AND diagnosis_code NOT LIKE 'J96%' -- Exclude respiratory failure
+    AND diagnosis_code NOT LIKE 'C%' -- Exclude cancer
+GROUP BY 
+    proc_cd,
+    proc_desc
+ORDER BY 
+    total_cost DESC
+LIMIT 10;
+
+-- Identify high-cost inpatient drugs vs. standard rates
+SELECT 
+    NDC,
+    proc_desc,
+    COUNT(DISTINCT patient_id) AS patient_count,
+    AVG(cost) AS avg_cost,
+    SUM(cost) AS total_cost
+FROM 
+    claims
+WHERE 
+    place_code = '21'
+    AND revenue_code = '0250'
+    AND cost > (SELECT AVG(cost) * 2 FROM claims WHERE revenue_code = '0250' AND place_code != '21') -- Twice outpatient average
+GROUP BY 
+    NDC,
+    proc_desc
+ORDER BY 
+    total_cost DESC
+LIMIT 10;
