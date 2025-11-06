@@ -1,8 +1,8 @@
--- Final SQL Script: Extract matched C-SNP vs PPO members with robust 2023 baseline severity
--- Output: member_id, plan_type, age, gender, zip, severity_2023, total_claim_36m
-
+-- ==============================================================
+-- 1. Raw member pools (C-SNP & PPO)
+-- ==============================================================
 WITH csnp_raw AS (
-    SELECT 
+    SELECT
         'C-SNP' AS plan_type,
         MembershipNumber AS member_id,
         MemDOB,
@@ -16,7 +16,7 @@ WITH csnp_raw AS (
     LIMIT 5000
 ),
 ppo_raw AS (
-    SELECT 
+    SELECT
         'PPO' AS plan_type,
         MembershipNumber AS member_id,
         MemDOB,
@@ -34,62 +34,55 @@ all_members AS (
     UNION ALL
     SELECT * FROM ppo_raw
 ),
--- Calculate age as of 2023-01-01
+
+-- ==============================================================
+-- 2. Age as of 2023-01-01 + 5-digit zip
+-- ==============================================================
 members_with_age AS (
-    SELECT 
+    SELECT
         member_id,
         plan_type,
         FLOOR(DATEDIFF('2023-01-01', MemDOB) / 365.25) AS age,
         gender,
-        LEFT(zip, 5) AS zip5
+        LEFT(zip, 5) AS zip
     FROM all_members
     WHERE MemDOB IS NOT NULL
       AND FLOOR(DATEDIFF('2023-01-01', MemDOB) / 365.25) >= 65
 ),
--- 1. Inpatient (21) & ER (23) flags in 2023
+
+-- ==============================================================
+-- 3. 2023 baseline severity (inpatient, ER, surgery, drugs)
+-- ==============================================================
 inpatient_er AS (
-    SELECT 
+    SELECT
         c.MembershipNumber AS member_id,
         MAX(CASE WHEN c.PLSRV_CD = '21' THEN 3 ELSE 0 END) AS hosp_flag,
         MAX(CASE WHEN c.PLSRV_CD = '23' THEN 2 ELSE 0 END) AS er_flag
     FROM hive_metastore.off_orig.claims_member c
-    WHERE c.PROC_DT >= '2023-01-01'
-      AND c.PROC_DT < '2024-01-01'
+    WHERE c.PROC_DT >= '2023-01-01' AND c.PROC_DT < '2024-01-01'
     GROUP BY c.MembershipNumber
 ),
--- 2. Major surgery proxy (CPT examples: cataract, joint, dialysis)
 surgery_flag AS (
     SELECT DISTINCT MembershipNumber AS member_id
     FROM hive_metastore.off_orig.claims_member
-    WHERE PROC_DT >= '2023-01-01'
-      AND PROC_DT < '2024-01-01'
+    WHERE PROC_DT >= '2023-01-01' AND PROC_DT < '2024-01-01'
       AND (
-          PROC_CD LIKE '6698%'    -- Cataract
-          OR PROC_CD LIKE '2744%' -- Knee replacement
-          OR PROC_CD LIKE '909%'  -- Dialysis
-          OR PROC_CD LIKE '0%'    -- ICD-10-PCS surgery
+          PROC_CD LIKE '6698%' OR PROC_CD LIKE '2744%' OR PROC_CD LIKE '909%' OR PROC_CD LIKE '0%'
       )
 ),
--- 3. Chronic drug proxy (J-codes, insulin, etc.)
 drug_flag AS (
     SELECT DISTINCT MembershipNumber AS member_id
     FROM hive_metastore.off_orig.claims_member
-    WHERE PROC_DT >= '2023-01-01'
-      AND PROC_DT < '2024-01-01'
-      AND (
-          PROC_CD LIKE 'J%'       -- Injected drugs
-          OR PROC_CD LIKE 'A42%'  -- Insulin
-          OR PROC_CD LIKE 'C%'    -- Cardiac
-      )
+    WHERE PROC_DT >= '2023-01-01' AND PROC_DT < '2024-01-01'
+      AND (PROC_CD LIKE 'J%' OR PROC_CD LIKE 'A42%' OR PROC_CD LIKE 'C%')
 ),
--- Combine all to compute severity score (0–10+)
 severity_calc AS (
-    SELECT 
+    SELECT
         m.member_id,
         m.plan_type,
         m.age,
         m.gender,
-        m.zip5 AS zip,
+        m.zip,
         (
             COALESCE(h.hosp_flag, 0) +
             COALESCE(h.er_flag, 0) +
@@ -101,25 +94,45 @@ severity_calc AS (
     LEFT JOIN surgery_flag s ON s.member_id = m.member_id
     LEFT JOIN drug_flag d ON d.member_id = m.member_id
 ),
--- 36-month total claims (2023-01-01 to 2025-12-31)
-claims_36m AS (
-    SELECT 
+
+-- ==============================================================
+-- 4. Claims by 12-month periods
+-- ==============================================================
+yearly_claims AS (
+    SELECT
         c.MembershipNumber AS member_id,
+        SUM(CASE 
+            WHEN c.PROC_DT >= '2023-01-01' AND c.PROC_DT < '2024-01-01' THEN c.gl_amt 
+            ELSE 0 
+        END) AS claim_y1,
+        SUM(CASE 
+            WHEN c.PROC_DT >= '2024-01-01' AND c.PROC_DT < '2025-01-01' THEN c.gl_amt 
+            ELSE 0 
+        END) AS claim_y2,
+        SUM(CASE 
+            WHEN c.PROC_DT >= '2025-01-01' AND c.PROC_DT < '2026-01-01' THEN c.gl_amt 
+            ELSE 0 
+        END) AS claim_y3,
         SUM(c.gl_amt) AS total_claim_36m
     FROM hive_metastore.off_orig.claims_member c
-    WHERE c.PROC_DT >= '2023-01-01'
-      AND c.PROC_DT < '2026-01-01'
+    WHERE c.PROC_DT >= '2023-01-01' AND c.PROC_DT < '2026-01-01'
     GROUP BY c.MembershipNumber
 )
--- Final output for matching & analysis
-SELECT 
+
+-- ==============================================================
+-- 5. Final output: one row per member
+-- ==============================================================
+SELECT
     sc.plan_type,
     sc.member_id,
     sc.age,
     sc.gender,
     sc.zip,
     sc.severity_2023,
-    COALESCE(c.total_claim_36m, 0) AS total_claim_36m
+    COALESCE(yc.claim_y1, 0) AS claim_y1,
+    COALESCE(yc.claim_y2, 0) AS claim_y2,
+    COALESCE(yc.claim_y3, 0) AS claim_y3,
+    COALESCE(yc.total_claim_36m, 0) AS total_claim_36m
 FROM severity_calc sc
-LEFT JOIN claims_36m c ON c.member_id = sc.member_id
+LEFT JOIN yearly_claims yc ON yc.member_id = sc.member_id
 ORDER BY sc.plan_type, sc.severity_2023 DESC, sc.member_id;
