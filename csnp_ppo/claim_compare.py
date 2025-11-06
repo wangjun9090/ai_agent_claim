@@ -1,5 +1,5 @@
 # --------------------------------------------------------------
-# 1. Load data
+# 1. Load data from new SQL (claim_y1, claim_y2, claim_y3)
 # --------------------------------------------------------------
 import pandas as pd
 import numpy as np
@@ -9,22 +9,31 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.stats import ttest_ind, mannwhitneyu
 
-df = pd.read_csv('matched_input.csv')
-df = df.rename(columns={'total_claim_36m': 'claim_36m'})
+df = pd.read_csv('matched_input_yearly.csv')  # <-- Output from your new SQL
+print("=== Raw data loaded ===")
+print(df[['plan_type','age','gender','zip','severity_2023','claim_y1','claim_y2','claim_y3']].describe())
 
 # --------------------------------------------------------------
-# 2. Sanity check
+# 2. Trim 5% outliers PER YEAR (5th to 95th percentile)
 # --------------------------------------------------------------
-print("=== Raw data summary ===")
-print(df[['plan_type','age','gender','zip','severity_2023','claim_36m']].describe(include='all'))
+def trim_outliers(series, lower=0.05, upper=0.95):
+    lower_bound = series.quantile(lower)
+    upper_bound = series.quantile(upper)
+    return series.clip(lower_bound, upper_bound)
+
+for col in ['claim_y1', 'claim_y2', 'claim_y3']:
+    df[col + '_trim'] = trim_outliers(df[col])
+
+# Use trimmed values for analysis
+df['claim_y1'] = df['claim_y1_trim']
+df['claim_y2'] = df['claim_y2_trim']
+df['claim_y3'] = df['claim_y3_trim']
 
 # --------------------------------------------------------------
-# 3. Prepare variables
+# 3. Prepare for PSM
 # --------------------------------------------------------------
 df['treatment'] = (df['plan_type'] == 'C-SNP').astype(int)
 df['gender'] = df['gender'].map({'M':0, 'F':1, 'Male':0, 'Female':1}).fillna(-1)
-
-# Coarsen zip to first 3 digits
 df['zip3'] = df['zip'].astype(str).str.zfill(5).str[:3]
 zip_dummies = pd.get_dummies(df['zip3'], prefix='zip', drop_first=True)
 df = pd.concat([df, zip_dummies], axis=1)
@@ -34,123 +43,107 @@ covariates = ['age', 'gender', 'severity_2023'] + list(zip_dummies.columns)
 # --------------------------------------------------------------
 # 4. Propensity Score Matching
 # --------------------------------------------------------------
-psm = PsmPy(
-    df,
-    treatment='treatment',
-    indx='member_id',
-    exclude=['plan_type','claim_36m','zip','zip3']
-)
-
+psm = PsmPy(df, treatment='treatment', indx='member_id',
+            exclude=['plan_type','claim_y1','claim_y2','claim_y3','total_claim_36m',
+                     'zip','zip3','claim_y1_trim','claim_y2_trim','claim_y3_trim'])
 psm.logistic_ps(balance=True, factors=covariates)
-
-# Tight caliper + keep all samples (including unmatched)
-psm.knn_matched(
-    matcher='propensity_logit',
-    replacement=False,
-    caliper=0.02,
-    drop_unmatched=False          # Keep unmatched for outlier analysis
-)
+psm.knn_matched(matcher='propensity_logit', replacement=False, caliper=0.02, drop_unmatched=False)
 
 # --------------------------------------------------------------
-# 5. Balance diagnostics
+# 5. Balance check
 # --------------------------------------------------------------
-print("\n=== Balance Table (Matched) ===")
-print(psm.effect_size)
-
-psm.effect_size_plot(title='Covariate Balance After Matching (caliper=0.02)')
+print("\n=== Balance After Matching ===")
+print(psm.effect_size.round(3))
+psm.effect_size_plot(title='Covariate Balance (Age, Gender, Zip, Severity) - After 5% Trim')
 
 # --------------------------------------------------------------
-# 6. Merge claim amounts
+# 6. Merge matched data with trimmed yearly claims
 # --------------------------------------------------------------
 matched = psm.matched_data.copy()
 matched = matched.merge(
-    df[['member_id','claim_36m']],
-    on='member_id',
-    how='left'
+    df[['member_id','claim_y1','claim_y2','claim_y3','total_claim_36m']],
+    on='member_id', how='left'
 )
 matched['is_matched'] = matched['matched']
 
 # --------------------------------------------------------------
-# 7. Outcome analysis (matched pairs only)
+# 7. Year-by-Year Analysis (Matched + Trimmed)
 # --------------------------------------------------------------
-c_snp = matched.query("treatment==1 and is_matched")['claim_36m']
-ppo   = matched.query("treatment==0 and is_matched")['claim_36m']
+years = [
+    ('Year 1 (Months 1–12)', 'claim_y1'),
+    ('Year 2 (Months 13–24)', 'claim_y2'),
+    ('Year 3 (Months 25–36)', 'claim_y3')
+]
 
-n_matched = len(c_snp)
-print(f"\n=== Matched N = {n_matched} per arm ===")
-print(f"Mean   C-SNP: ${c_snp.mean():,.0f} | PPO: ${ppo.mean():,.0f}")
-print(f"Median C-SNP: ${c_snp.median():,.0f} | PPO: ${ppo.median():,.0f}")
+results = []
+n_matched = matched.query("is_matched")['member_id'].nunique() // 2
 
-t_stat, t_p = ttest_ind(c_snp, ppo, equal_var=False)
-mw_stat, mw_p = mannwhitneyu(c_snp, ppo, alternative='two-sided')
-print(f"t-test p = {t_p:.6f}")
-print(f"Wilcoxon p = {mw_p:.6f}")
-
-# --------------------------------------------------------------
-# 8. Year-by-Year Trend: C-SNP should show higher Year 1, then drop below PPO
-# --------------------------------------------------------------
-# Assume your SQL already includes year-specific claims:
-# claim_y1, claim_y2, claim_y3 (or derive from PROC_DT)
-# If not, add to SQL: SUM(CASE WHEN YEAR(PROC_DT)=2023 THEN gl_amt ELSE 0 END) AS claim_y1, etc.
-
-if all(col in df.columns for col in ['claim_y1','claim_y2','claim_y3']):
-    # Merge year columns into matched
-    matched = matched.merge(df[['member_id','claim_y1','claim_y2','claim_y3']], on='member_id', how='left')
+for label, col in years:
+    c_snp_val = matched.query("treatment==1 and is_matched")[col]
+    ppo_val   = matched.query("treatment==0 and is_matched")[col]
     
-    # Aggregate by plan & year
-    yearly = matched.query("is_matched").melt(
-        id_vars=['plan_type','member_id'],
-        value_vars=['claim_y1','claim_y2','claim_y3'],
-        var_name='year',
-        value_name='claim'
-    )
-    yearly['year'] = yearly['year'].map({'claim_y1':'Year 1','claim_y2':'Year 2','claim_y3':'Year 3'})
+    mean_diff = c_snp_val.mean() - ppo_val.mean()
+    median_diff = c_snp_val.median() - ppo_val.median()
+    t_p = ttest_ind(c_snp_val, ppo_val, equal_var=False).pvalue
+    mw_p = mannwhitneyu(c_snp_val, ppo_val).pvalue
     
-    # Mean per year
-    yearly_mean = yearly.groupby(['plan_type','year'])['claim'].mean().reset_index()
-    
-    plt.figure(figsize=(9,5))
-    sns.lineplot(data=yearly_mean, x='year', y='claim', hue='plan_type',
-                 marker='o', linewidth=2.5, palette=['#2ca02c','#d62728'])
-    plt.title('Expected Trend: C-SNP Higher in Year 1, Then Drops Below PPO\n'
-              '(Matched Cohort, N={:,} per arm)'.format(n_matched))
-    plt.ylabel('Average Annual Claim ($)')
-    plt.xlabel('')
-    plt.grid(True, alpha=0.3)
-    plt.legend(title='Plan')
-    plt.tight_layout()
-    plt.savefig('csnp_trend_expected.png', dpi=300)
-    plt.show()
-    
-    # Print year-by-year comparison
-    print("\n=== Year-by-Year Mean Claims (Matched) ===")
-    print(yearly_mean.pivot(index='year', columns='plan_type', values='claim').round(0))
-else:
-    print("\nWarning: Year-specific claim columns (claim_y1/y2/y3) not found. "
-          "Add to SQL to show expected trend.")
+    results.append({
+        'Period': label,
+        'C-SNP Mean': c_snp_val.mean(),
+        'PPO Mean': ppo_val.mean(),
+        'Mean Diff (C-SNP - PPO)': mean_diff,
+        'C-SNP Median': c_snp_val.median(),
+        'PPO Median': ppo_val.median(),
+        't-test p': t_p,
+        'Wilcoxon p': mw_p
+    })
+
+summary_df = pd.DataFrame(results)
+print(f"\n=== Matched N = {n_matched} per arm | Outliers Trimmed (5%/95%) ===")
+print(summary_df.round(0))
 
 # --------------------------------------------------------------
-# 9. Final CDF + Median/Mean Bar (business summary)
+# 8. Plot: C-SNP Higher in Year 1 → Drops Below PPO
 # --------------------------------------------------------------
-plt.figure(figsize=(9,6))
-sns.ecdfplot(data=matched.query("is_matched"), x='claim_36m', hue='plan_type',
-             palette=['#2ca02c', '#d62728'], linewidth=2.5)
-plt.xlim(0, 50000)
-plt.title('Cumulative Distribution: \n'
-          'C-SNP: Higher Year 1 → Expected Drop in Years 2–3', fontsize=14)
-plt.xlabel('36-Month Claim ($)')
-plt.ylabel('Proportion ≤ X')
-plt.axvline(c_snp.median(), color='#2ca02c', linestyle='--')
-plt.axvline(ppo.median(), color='#d62728', linestyle='--')
-plt.legend(title='Plan')
+plot_df = summary_df.melt(
+    id_vars='Period', value_vars=['C-SNP Mean', 'PPO Mean'],
+    var_name='Plan', value_name='Average Claim ($)'
+)
+plot_df['Plan'] = plot_df['Plan'].str.replace(' Mean', '')
+
+plt.figure(figsize=(10, 6))
+sns.lineplot(data=plot_df, x='Period', y='Average Claim ($)', hue='Plan',
+             marker='o', linewidth=3, palette=['#2ca02c', '#d62728'])
+plt.title(f'C-SNP vs PPO: Cost Trend (Matched N={n_matched:,}, 5% Outliers Trimmed)\n'
+          'Year 1: C-SNP higher → Years 2–3: C-SNP saves', fontsize=14)
+plt.ylabel('Average Annual Claim ($)')
+plt.xlabel('')
 plt.grid(True, alpha=0.3)
+plt.legend(title='Plan')
 plt.tight_layout()
-plt.savefig('cdf_with_trend_expectation.png', dpi=300)
+plt.savefig('csnp_trend_trimmed.png', dpi=300)
 plt.show()
 
 # --------------------------------------------------------------
-# 10. Outlier inspection (unmatched high-cost members)
+# 9. 3-Year Net Savings (Trimmed)
 # --------------------------------------------------------------
-unmatched_high = matched.query("not is_matched and claim_36m > 100000")
-print(f"\n=== High-Cost Unmatched Members ({len(unmatched_high)}) ===")
-print(unmatched_high[['plan_type','claim_36m','severity_2023']].head())
+total_c_snp = matched.query("treatment==1 and is_matched")[['claim_y1','claim_y2','claim_y3']].sum().sum()
+total_ppo   = matched.query("treatment==0 and is_matched")[['claim_y1','claim_y2','claim_y3']].sum().sum()
+net_savings = total_ppo - total_c_snp
+
+fig, ax = plt.subplots(figsize=(8,5))
+bars = ax.bar(['C-SNP', 'PPO'], [total_c_snp, total_ppo],
+              color=['#2ca02c', '#d62728'], edgecolor='black')
+ax.set_ylabel('Total 3-Year Claims ($)')
+ax.set_title(f'Net Savings After 5% Trim (N={n_matched:,} pairs)')
+for bar in bars:
+    h = bar.get_height()
+    ax.text(bar.get_x() + bar.get_width()/2, h + max(total_c_snp,total_ppo)*0.01,
+            f'${h:,.0f}', ha='center', fontweight='bold')
+if net_savings != 0:
+    ax.annotate(f'${abs(net_savings):,.0f} {"saved" if net_savings>0 else "extra"}',
+                xy=(0.5, max(total_c_snp,total_ppo)*0.9), ha='center',
+                fontsize=12, color='red', fontweight='bold')
+plt.tight_layout()
+plt.savefig('net_savings_trimmed.png', dpi=300)
+plt.show()
