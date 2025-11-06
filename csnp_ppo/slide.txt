@@ -1,0 +1,53 @@
+CSNP vs PPO: 3-Year Claim Trends  
+(95% Core Population, Matched N=2,301)
+
+Result: CSNP Delivers Proven, Significant Savings
+
+• 3-Year Avg Savings per Member: **$1,702**  
+  → Median: CSNP **$382** vs PPO **$1,694** (p < 0.001)
+
+• Annual Breakdown:
+   – Year 1: CSNP $1,511 | PPO $2,012 → **Saves $501**
+   – Year 2: CSNP $1,906 | PPO $2,673 → **Saves $767**
+   – Year 3: CSNP $1,505 | PPO $1,939 → **Saves $434**
+
+Real-World Impact (2025):
+   • 9,504 members switched to CSNP
+   • **First-year savings: $4.76M** (verified)
+
+-----------------------------------------------------------
+   CSNP vs PPO: Top 5% Highest Claims  
+(Matched Cohort, Post 5% Outlier Trim)
+
+Key Insight: CSNP Saves Even in High-Risk Cases
+
+• Year 1: CSNP $162,570 | PPO $227,034 → **Saves $64,464**
+• Year 2: CSNP $161,983 | PPO $338,157 → **Saves $176,174**
+• Year 3: CSNP $189,554 | PPO $219,426 → **Saves $29,872**
+
+Average Annual Savings in Top 5%: **$90,170 per member**
+
+
+-------------------------------------------------------
+CSNP vs PPO: Methodology Overview  
+(Propensity Score Matching & Data Prep)
+
+Approach: Robust, Transparent Matching
+
+• Identified 8,000 newly enrolled members (01/01/2023)  
+  → Evenly split: C-SNP and PPO/HMO groups (all active)
+
+• Applied Propensity Score Model (PSM)  
+  → Selected 2,301 matched pairs
+
+• Balancing Variables:
+   – Age
+   – Gender
+   – ZIP code
+   – Diagnosis severity
+
+• Data Cleaning:
+   – Removed top 5% of outliers (claim amount)
+   – Ensures stability & real-world relevance
+
+Statistical Significance: **p < 0.001** across groups
