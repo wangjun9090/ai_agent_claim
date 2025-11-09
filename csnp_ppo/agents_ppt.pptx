@@ -1,0 +1,75 @@
+Defensive AI: The Best-Fit Health Plan Agent  
+Finding the Optimal Plan for Chronic Members
+
+[Your Name] | [Your Title] | [Date]
+
+Agent Vision:
+“Best-fit health plan is not just a choice — it’s a defensive strategy for membership healthcare.
+It protects chronic patients from high costs while delivering maximum savings and care quality.”
+
+------------------------
+slide 2
+CSNP vs PPO: Real Claims Data (2023–2025)
+
+• 8,000 newly enrolled members analyzed
+• Propensity score matching: 2,031 balanced pairs
+• Top 5% outliers removed → P < 0.001
+
+Average 3-Year Savings per Member:
+   CSNP: $382/year
+   PPO:  $1,694/year
+   → **CSNP saves $1,702 per member**
+
+| Year | CSNP | PPO | Savings |
+|------|------|-----|--------|
+| Y1   | $1,511 | $2,012 | $501 |
+| Y2   | $1,506 | $2,473 | $967 |
+| Y3   | $1,505 | $1,839 | $334 |
+
+9504 members switched in 2025 → **$4.7M saved in Year 1**
+
+-----------------------------
+slide 3
+(b) Architecture of the Best-Fit Health Plan Agent (BFA)
+
+┌────────────────────────────────────────────────────────────────────┐
+│                     What is the best-fit plan?                     │
+│                How can we switch to save $1,702?                   │
+└────────────────────────────────────────────────────────────────────┘
+                              ↓
+                ┌────────────────────────────┐
+                │        Orchestrator        │
+                └────────────────────────────┘
+                              ↓
+        ┌─────────────┐   ┌─────────────┐   ┌─────────────┐
+        │  DS Agent   │   │  EE Agent   │   │  SC Agent   │
+        └─────────────┘   └─────────────┘   └─────────────┘
+                ↓                 ↓                 ↓
+   Chronic Outlier       Eligibility       Outreach Script
+     Detection          Hierarchy Check    (Email/Call)
+
+┌────────────────────────────────────────────────────────────────────┐
+│                     Best-Fit Health Plan Agent                    │
+└────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
+│  Data Science   │  │ Enrollment Expert│  │  Switch Coach   │
+│     Agent       │  │     Agent        │  │     Agent       │
+└─────────────────┘  └─────────────────┘  └─────────────────┘
+   • Claims Z-score     • HCC Mapping       • Personalized Email
+   • Cost Outliers      • CSNP Criteria      • Call Opener
+   • Risk Scoring       • Dual Chronic        • Urgency + Savings
+
+
+---------------------
+slide 5
+Defensive AI Results (2025 Pilot)
+• 15% more CSNP-eligible members identified
+• $47M projected savings from 9,504 switches
+• 30% higher switch rate with AI outreach
+
+Next: Scale to 1M members
+→ **$500M+ in defensive savings by 2028**
+
+“Defensive AI doesn’t sell —  
+ it **protects** members with the best-fit plan.”
